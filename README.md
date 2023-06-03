@@ -7,7 +7,7 @@ see testing.ipynb for example. Built on top of [LSPair](https://github.com/diego
 Weighting and Beta Matching
 ![image](https://github.com/diegodalvarez/LSPort/assets/48641554/712db1c4-0d9e-4259-8273-c8a52648737f)
 Portfolio Beta exposure, comparative returns and portfolio cumulative returns
-![image](https://github.com/diegodalvarez/LSPort/assets/48641554/a4fccff6-773f-47a9-bd78-9cffbcf39c07)
+![image](https://github.com/diegodalvarez/LSPort/assets/48641554/e9c93ad1-a536-4dc6-aa58-15ffa7c74669)
 
 ## Long Fallen Angels and Short HYG hedging beta via TLT (US 10y Treasury ETF)
 The code's beta optimization may not be solvable within 100% fully funded (no leverage) positions and thus there is a 10% mininum holding per each name. We can see that happen when we run this pair. 
