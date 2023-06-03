@@ -11,3 +11,7 @@ Portfolio Beta exposure, comparative returns and portfolio cumulative returns
 
 ## Long Fallen Angels and Short HYG hedging beta via TLT (US 10y Treasury ETF)
 The code's beta optimization may not be solvable within 100% fully funded (no leverage) positions and thus there is a 10% mininum holding per each name. We can see that happen when we run this pair. 
+![image](https://github.com/diegodalvarez/LSPort/assets/48641554/97d3b581-8110-433c-bd3d-32a2c71944e5)
+![image](https://github.com/diegodalvarez/LSPort/assets/48641554/30022929-3adf-47e0-a93d-71203b856609)
+
+Also this idea comes from some of my other work on Long Fallen Angels. You can find the repo [here](https://github.com/diegodalvarez/FallenAngelRiskPremia)
