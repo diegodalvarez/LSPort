@@ -1,4 +1,13 @@
-# LS Port
+# LSPort
+
+# Required Packages
+| Name         | Pacakage                                                                                                                        | File                                             |                           
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Pandas       | ![Pandas](https://img.shields.io/badge/pandas-%23150458.svg?style=for-the-badge&logo=pandas&logoColor=white)                    | All Files|
+| Matplotlib   | ![Matplotlib](https://img.shields.io/badge/Matplotlib-%23ffffff.svg?style=for-the-badge&logo=Matplotlib&logoColor=black)        | LSPort.py
+| PuLP         |                                                                                                                                 | LSPair.py
+
+# Background
 Long Short Pair Backtesting Tool (still in development)
 see testing.ipynb for example. Built on top of [LSPair](https://github.com/diegodalvarez/LSPair), future development will also develop streamlit-based downstream web-facing GUI like [LSPair Streamlit Repo](https://github.com/diegodalvarez/LSPairStreamlit) [LSPair Streamlit link](https://diegodalvarez-lspairstreamlit-streamlit-frontend-f78dmo.streamlit.app/)
 
