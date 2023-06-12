@@ -753,7 +753,7 @@ class LSPort(LSPair):
             (df_stacked.plot(
                 ax = axes_weighted[0],
                 ylabel = "Weight (%)",
-                title = "Portfolio Weighting",
+                title = "Portfolio Rebalance Schedule",
                 color = "black",
                 legend = False))
             
@@ -997,3 +997,340 @@ class LSPort(LSPair):
             return df_out
 
         else: return None
+
+    # an initializer like function to keep the variable in member
+    def _set_initial_capital(self, initial_capital: float): self.port_capital = pd.Series(initial_capital)
+
+    # shift to get shares
+    def _shift_shares(self, df):
+        return(df.assign(old_shares = lambda x: x.num_shares.shift(1).fillna(0)))
+
+    def _pnl(self, df: pd.DataFrame):
+
+        df_tmp = (df.assign(
+            port_value = self.port_capital.iloc[-1],
+            allocated_cash = lambda x: x.port_value * x.lag_weight,
+            num_shares = lambda x: (x.allocated_cash / x.price).astype(int),
+            position_value = lambda x: x.num_shares * x.price,
+            cash = lambda x: x.allocated_cash - x.position_value,
+            position_new_value = lambda x: ((x.rtns * np.sign(x.num_shares)) + 1) * x.position_value,
+            position_pnl = lambda x: x.position_new_value - x.position_value,
+            weighted_rtn = lambda x: x.lag_weight * x.rtns * np.sign(x.num_shares)))
+
+        new_port_value = df_tmp.position_new_value.sum() + df_tmp.cash.sum()
+        self.port_capital = pd.concat([self.port_capital, pd.Series(new_port_value)])
+
+        return df_tmp
+
+    def _cum_single_values(self, df):
+
+        return(df.sort_values(
+            "Date").
+            assign(
+                cum_pnl = lambda x: np.cumsum(x.position_pnl),
+                cum_rtn = lambda x: (np.cumprod(1 + x.weighted_rtn) - 1) * 100))
+ 
+    def get_backtest(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float):
+      
+        self._set_initial_capital(initial_capital)
+
+        prices_df = (pd.DataFrame(
+            [self.long_position_prices, -1 * self.short_position_prices]).
+            T.
+            reset_index().
+            melt(id_vars = self.long_position_prices.index.name).
+            rename(columns = {
+                "variable": "ticker",
+                "value": "price"}))
+
+        df_position, df_port = self.position_rebalance(
+                lookback_window = lookback_window,
+                rebalance_method = rebalance_method,
+                verbose = False)
+        
+        df_position_backtest = (df_position[
+            ["Date", "ticker", "position", "directional_beta", "rtns", "lag_weight"]].
+            merge(prices_df, how = "left", on = ["Date", "ticker"]).
+            dropna().
+            sort_values("Date"))
+        
+        df_purchase_book = (df_position_backtest.groupby(
+            "Date", group_keys = False).
+            apply(self._pnl).
+            groupby("ticker", group_keys = False).
+            apply(self._shift_shares).
+            assign(change_shares = lambda x: x.num_shares - x.old_shares).
+            groupby("ticker", group_keys = False).
+            apply(self._cum_single_values))
+        
+        df_port = (df_purchase_book[
+            ["Date", "port_value"]].
+            drop_duplicates().
+            assign(
+                port_change = lambda x: x.port_value.pct_change().fillna(0),
+                port_pnl = lambda x: x.port_value * x.port_change,
+                cum_pnl = lambda x: np.cumsum(x.port_pnl),
+                cum_rtn = lambda x: (np.cumprod(1 + x.port_change) - 1) * 100))
+        
+        return df_purchase_book, df_port
+
+    def get_weight_and_shares(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float):
+
+        df_purchase, df_port = self.get_backtest(
+            lookback_window = lookback_window, 
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+
+        df_tmp = (df_purchase[
+            ["Date", "ticker", "position_value", "port_value", "num_shares"]].
+            assign(weight = lambda x: x.position_value / x.port_value).
+            drop(columns = ["port_value", "position_value"]).
+            pivot(index = "Date", columns = "ticker", values = ["weight", "num_shares"]))
+
+        df_weight, df_shares = df_tmp["weight"], df_tmp["num_shares"]
+
+        return df_weight, df_shares
+
+    def plot_weight_and_shares(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float) -> plt.figure:
+
+        df_weight, df_shares = self.get_weight_and_shares(
+            lookback_window = lookback_window,
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+
+        fig, axes = plt.subplots(ncols = 2, figsize = (20,6))
+        (df_weight.assign(
+            long_weight = 1).
+            drop(columns = [self.long_name]).
+            rename(columns = {"long_weight": self.long_name}).
+            plot(
+                ax = axes[0],
+                legend = False, 
+                color = "black",
+                title = "Weighting",
+                ylabel = "%"))
+
+        axes[0].fill_between(
+            x = df_weight.index,
+            y1 = df_weight[self.short_name],
+            y2 = 0,
+            where = df_weight[self.short_name] > 0,
+            facecolor = "red",
+            alpha = 0.3)
+
+        axes[0].fill_between(
+            x = df_weight.index,
+            y1 = 1,
+            y2 = df_weight[self.short_name],
+            where = df_weight[self.short_name] < 1,
+            facecolor = "green",
+            alpha = 0.3)
+
+        (df_shares[
+            [self.long_name]].
+            plot(
+                ax = axes[1],
+                color = "green",
+                legend = False,
+                ylabel = "Num Shares (long)",
+                title = "Num of Shares"))
+
+        legend_elements = [
+            Patch(facecolor = "green", alpha = 0.3, label = self.long_name),
+            Patch(facecolor = "red", alpha = 0.3, label = self.short_name)]
+
+        axes[0].legend(handles = legend_elements)
+
+        axes1_copy = axes[1].twinx()
+        axes1_copy.invert_yaxis()
+        (df_shares[
+            [self.short_name]].
+            plot(
+                legend = False,
+                ax = axes1_copy,
+                color = "red"))
+        
+        axes[1].set_label(self.long_name)
+        axes[1].legend(loc = "upper left")
+        
+        axes1_copy.set_label(self.short_name)
+        axes1_copy.legend(loc = "upper right")
+
+        axes1_copy.set_ylabel("Num Shares (short)", rotation = 270, labelpad = 15.5)
+
+        plt.tight_layout()
+        return fig
+    
+    def get_backtest_portfolio_beta_and_notional(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float):
+
+        df_purchase, df_port = self.get_backtest(
+            lookback_window = lookback_window, 
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+        
+        df_beta = (df_purchase[
+            ["Date", "ticker", "directional_beta", "position_value", "port_value"]].
+            assign(
+                weight = lambda x: x.position_value / x.port_value,
+                weighted_beta = lambda x: x.weight * x.directional_beta).
+            drop(columns = ["position_value", "port_value", "weight", "directional_beta"]).
+            pivot(index = "Date", columns = "ticker", values = "weighted_beta"))
+        
+        df_port_value = (df_purchase[
+            ["Date", "ticker", "position_value"]].
+            query("ticker == @self.long_name").
+            pivot(index = "Date", columns = "ticker", values = "position_value").
+            reset_index().
+            merge(
+                (df_purchase[
+                    ["Date", "port_value"]].
+                    drop_duplicates()),
+                how = "inner",
+                on = ["Date"]).
+            set_index("Date"))
+        
+        return df_beta, df_port_value
+    
+    def plot_backtest_portfolio_beta_and_notional(
+        self, 
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float) -> plt.figure:
+
+        df_beta, df_port_value = self.get_backtest_portfolio_beta_and_notional(
+            lookback_window = lookback_window,
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+        
+        fig, axes = plt.subplots(ncols = 2, figsize = (20,6))
+
+        (df_beta[
+            [self.long_name]].
+            plot(
+                ax = axes[0],
+                ylabel = "Long Beta",
+                legend = False,
+                color = ["blue"],
+                title = "Portfolio Beta Matching"))
+
+        axes[0].set_label(self.long_name)
+        axes[0].legend(loc = "upper right")
+
+        axes0_copy = axes[0].twinx()
+        axes0_copy.invert_yaxis()
+        (df_beta[
+            [self.short_name]].
+            plot(
+                ax = axes0_copy,
+                ylabel = "Short Beta",
+                color = ["black"]))
+
+        axes0_copy.set_ylabel("Short Beta", rotation = 270, labelpad = 15.5)
+        axes0_copy.legend(loc = "upper left")
+
+        df_port_value.plot(
+            ax = axes[1],
+            legend = False,
+            ylabel = "Notional Value",
+            color = "black",
+            title = "Notional Value")
+
+        axes[1].fill_between(
+            x = df_port_value.index,
+            y1 = df_port_value[self.long_name],
+            y2 = 0,
+            where = df_port_value[self.long_name] > 0,
+            facecolor = "green",
+            alpha = 0.3)
+
+        axes[1].fill_between(
+            x = df_port_value.index,
+            y1 = df_port_value["port_value"],
+            y2 = df_port_value[self.long_name],
+            where = df_port_value[self.long_name] < df_port_value["port_value"],
+            facecolor = "red",
+            alpha = 0.3)
+
+        legend_elements = [
+            Patch(facecolor = "green", alpha = 0.3, label = self.long_name),
+            Patch(facecolor = "red", alpha = 0.3, label = self.short_name)]
+        axes[1].legend(handles = legend_elements)
+
+        plt.tight_layout()
+        return fig
+    
+    def get_backtest_pnl_and_rtn(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float):
+
+
+        df_purchase, df_port = self.get_backtest(
+            lookback_window = lookback_window, 
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+
+        df_tmp = (df_purchase[[
+            "ticker", "Date", "cum_pnl", "cum_rtn"]].
+            pivot(index = "Date", columns = "ticker", values = ["cum_pnl", "cum_rtn"]))
+
+        cum_pnl, cum_rtn = df_tmp["cum_pnl"], df_tmp["cum_rtn"]
+
+        return cum_pnl, cum_rtn
+    
+    def plot_backtest_pnl_and_rtn(
+        self,
+        lookback_window: int,
+        rebalance_method: str,
+        initial_capital: float):
+
+        cum_pnl, cum_rtn = self.get_backtest_pnl_and_rtn(
+            lookback_window = lookback_window,
+            rebalance_method = rebalance_method,
+            initial_capital = initial_capital)
+        
+        fig, axes = plt.subplots(ncols = 2, figsize = (20,6))
+
+        (cum_pnl[
+            [self.long_name]].
+            plot(
+                ax = axes[0],
+                ylabel = "PnL ($)",
+                color = "blue"))
+        
+        ((cum_pnl[[self.short_name]] * -1).
+        plot(
+            ax = axes[0],
+            color = "black"))
+        
+        (cum_rtn[
+            [self.long_name]].
+            plot(
+                ax = axes[1],
+                ylabel = "PnL ($)",
+                color = "blue"))
+        
+        ((cum_rtn[[self.short_name]]).
+        plot(
+            ax = axes[1],
+            color = "black"))
+
+        plt.tight_layout()
+        return fig
